@@ -76,6 +76,7 @@ struct idletimer_tg {
 	bool active;
 	uid_t uid;
 	bool suspend_time_valid;
+	uid_t uid;
 };
 
 static LIST_HEAD(idletimer_tg_list);
