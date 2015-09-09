@@ -648,6 +648,7 @@ static int __bitmap_parselist(const char *buf, unsigned int buflen,
 				b = 0;
 				in_range = 1;
 				exp_digit = 1;
+				at_start = 1;
 				continue;
 			}
 
@@ -660,6 +661,9 @@ static int __bitmap_parselist(const char *buf, unsigned int buflen,
 			exp_digit = 0;
 			totaldigits++;
 		}
+		/* if no digit is after '-', it's wrong*/
+		if (at_start && in_range)
+			return -EINVAL;
 		if (!(a <= b))
 			return -EINVAL;
 		if (b >= nmaskbits)
