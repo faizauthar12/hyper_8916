@@ -87,6 +87,8 @@ static inline int venus_hfi_prepare_enable_clks(
 	struct venus_hfi_device *device);
 static inline void venus_hfi_disable_unprepare_clks(
 	struct venus_hfi_device *device);
+static void venus_hfi_flush_debug_queue(
+	struct venus_hfi_device *device, u8 *packet);
 
 static inline void venus_hfi_set_state(struct venus_hfi_device *device,
 		enum venus_hfi_state state)
@@ -139,12 +141,17 @@ static void venus_hfi_sim_modify_cmd_packet(u8 *packet,
 
 	fw_bias = device->hal_data->firmware_base;
 	sys_init = (struct hfi_cmd_sys_session_init_packet *)packet;
-	if (&device->session_lock) {
-		mutex_lock(&device->session_lock);
-		session = hfi_process_get_session(
-				&device->sess_head, sys_init->session_id);
-		mutex_unlock(&device->session_lock);
-	}
+
+	/* Ideally we should acquire device->session_lock. If we acquire
+	 * we may go to deadlock with inst->*_lock between two threads.
+	 * Ex : in the forward path we acquire inst->internalbufs.lock and
+	 * session_lock and in the reverse path, we acquire session_lock and
+	 * internalbufs.lock. So this may introduce deadlock. So we are not
+	 * doing that. On virtio it is less likely to run two sessions
+	 * concurrently. So it should be fine */
+
+	session = hfi_process_get_session(
+			&device->sess_head, sys_init->session_id);
 	if (!session) {
 		dprintk(VIDC_DBG, "%s :Invalid session id : %x\n",
 				__func__, sys_init->session_id);
@@ -2230,6 +2237,8 @@ static int venus_hfi_core_init(void *device)
 	struct hfi_cmd_sys_init_packet pkt;
 	struct hfi_cmd_sys_get_property_packet version_pkt;
 	int rc = 0;
+	struct list_head *ptr, *next;
+	struct hal_session *session = NULL;
 	struct venus_hfi_device *dev;
 
 	if (device) {
@@ -2242,7 +2251,20 @@ static int venus_hfi_core_init(void *device)
 	venus_hfi_set_state(dev, VENUS_STATE_INIT);
 
 	dev->intr_status = 0;
+
+	mutex_lock(&dev->session_lock);
+	list_for_each_safe(ptr, next, &dev->sess_head) {
+		/* This means that session list is not empty. Kick stale
+		 * sessions out of our valid instance list, but keep the
+		 * list_head inited so that list_del (in the future, called
+		 * by session_clean()) will be valid. When client doesn't close
+		 * them, then it is a genuine leak which driver can't fix. */
+		session = list_entry(ptr, struct hal_session, list);
+		list_del_init(&session->list);
+	}
 	INIT_LIST_HEAD(&dev->sess_head);
+	mutex_unlock(&dev->session_lock);
+
 	venus_hfi_set_registers(dev);
 
 	if (!dev->hal_client) {
@@ -2518,6 +2540,26 @@ static void venus_hfi_set_default_sys_properties(
 		dprintk(VIDC_WARN, "Setting h/w power collapse ON failed\n");
 }
 
+static int venus_hfi_session_clean(void *session)
+{
+	struct hal_session *sess_close;
+	struct venus_hfi_device *device;
+	if (!session) {
+		dprintk(VIDC_ERR, "Invalid Params %s\n", __func__);
+		return -EINVAL;
+	}
+	sess_close = session;
+	device = sess_close->device;
+	venus_hfi_flush_debug_queue(sess_close->device, NULL);
+	dprintk(VIDC_DBG, "deleted the session: 0x%p\n",
+			sess_close);
+	mutex_lock(&device->session_lock);
+	list_del(&sess_close->list);
+	kfree(sess_close);
+	mutex_unlock(&device->session_lock);
+	return 0;
+}
+
 static void *venus_hfi_session_init(void *device, void *session_id,
 		enum hal_domain session_type, enum hal_video_codec codec_type)
 {
@@ -2562,7 +2604,7 @@ static void *venus_hfi_session_init(void *device, void *session_id,
 	return (void *) new_session;
 
 err_session_init_fail:
-	kfree(new_session);
+	venus_hfi_session_clean(new_session);
 	return NULL;
 }
 
@@ -2612,27 +2654,10 @@ static int venus_hfi_session_end(void *session)
 
 static int venus_hfi_session_abort(void *session)
 {
+	venus_hfi_flush_debug_queue(
+		((struct hal_session *)session)->device, NULL);
 	return venus_hfi_send_session_cmd(session,
 		HFI_CMD_SYS_SESSION_ABORT);
-}
-
-static int venus_hfi_session_clean(void *session)
-{
-	struct hal_session *sess_close;
-	if (!session) {
-		dprintk(VIDC_ERR, "Invalid Params %s\n", __func__);
-		return -EINVAL;
-	}
-	sess_close = session;
-	dprintk(VIDC_DBG, "deleted the session: 0x%p\n",
-			sess_close);
-	mutex_lock(&((struct venus_hfi_device *)
-			sess_close->device)->session_lock);
-	list_del(&sess_close->list);
-	mutex_unlock(&((struct venus_hfi_device *)
-			sess_close->device)->session_lock);
-	kfree(sess_close);
-	return 0;
 }
 
 static int venus_hfi_session_set_buffers(void *sess,
@@ -3005,6 +3030,7 @@ static int venus_hfi_prepare_pc(struct venus_hfi_device *device)
 		dprintk(VIDC_ERR,
 				"Wait interrupted or timeout for PC_PREP_DONE: %d\n",
 				rc);
+		venus_hfi_flush_debug_queue(device, NULL);
 		rc = -EIO;
 		goto err_pc_prep;
 	}
@@ -3149,12 +3175,54 @@ static void venus_hfi_process_msg_event_notify(
 		}
 	}
 }
+
+static void venus_hfi_flush_debug_queue(
+	struct venus_hfi_device *device, u8 *packet)
+{
+	bool local_packet = false;
+
+	if (!device) {
+		dprintk(VIDC_ERR, "%s: Invalid params\n", __func__);
+		return;
+	}
+	if (!packet) {
+		packet = kzalloc(VIDC_IFACEQ_VAR_HUGE_PKT_SIZE, GFP_TEMPORARY);
+		if (!packet) {
+			dprintk(VIDC_ERR, "In %s() Fail to allocate mem\n",
+				__func__);
+			return;
+		}
+		local_packet = true;
+	}
+
+	while (!venus_hfi_iface_dbgq_read(device, packet)) {
+		struct hfi_msg_sys_coverage_packet *pkt =
+			(struct hfi_msg_sys_coverage_packet *) packet;
+		if (pkt->packet_type == HFI_MSG_SYS_COV) {
+			int stm_size = 0;
+			dprintk(VIDC_DBG,
+				"DbgQ pkt size:%d\n", pkt->msg_size);
+			stm_size = stm_log_inv_ts(0, 0,
+				pkt->rg_msg_data, pkt->msg_size);
+			if (stm_size == 0)
+				dprintk(VIDC_ERR,
+					"In %s, stm_log returned size of 0\n",
+					__func__);
+		} else {
+			struct hfi_msg_sys_debug_packet *pkt =
+				(struct hfi_msg_sys_debug_packet *) packet;
+			dprintk(VIDC_FW, "%s", pkt->rg_msg_data);
+		}
+	}
+	if (local_packet)
+		kfree(packet);
+}
+
 static void venus_hfi_response_handler(struct venus_hfi_device *device)
 {
 	u8 *packet = NULL;
 	u32 rc = 0;
 	struct hfi_sfr_struct *vsfr = NULL;
-	int stm_size = 0;
 
 	packet = kzalloc(VIDC_IFACEQ_VAR_HUGE_PKT_SIZE, GFP_TEMPORARY);
 	if (!packet) {
@@ -3198,25 +3266,7 @@ static void venus_hfi_response_handler(struct venus_hfi_device *device)
 						"Failed to allocate OCMEM. Performance will be impacted\n");
 			}
 		}
-		while (!venus_hfi_iface_dbgq_read(device, packet)) {
-			struct hfi_msg_sys_coverage_packet *pkt =
-				(struct hfi_msg_sys_coverage_packet *) packet;
-			if (pkt->packet_type == HFI_MSG_SYS_COV) {
-				dprintk(VIDC_DBG,
-					"DbgQ pkt size:%d\n", pkt->msg_size);
-				stm_size = stm_log_inv_ts(0, 0,
-					pkt->rg_msg_data, pkt->msg_size);
-				if (stm_size == 0)
-					dprintk(VIDC_ERR,
-						"In %s, stm_log returned size of 0\n",
-						__func__);
-			} else {
-				struct hfi_msg_sys_debug_packet *pkt =
-					(struct hfi_msg_sys_debug_packet *)
-					packet;
-				dprintk(VIDC_FW, "%s", pkt->rg_msg_data);
-			}
-		}
+		venus_hfi_flush_debug_queue(device, packet);
 		switch (rc) {
 		case HFI_MSG_SYS_PC_PREP_DONE:
 			dprintk(VIDC_DBG,
@@ -4123,6 +4173,7 @@ static void *venus_hfi_add_device(u32 device_id,
 		INIT_LIST_HEAD(&hal_ctxt.dev_head);
 
 	INIT_LIST_HEAD(&hdevice->list);
+	INIT_LIST_HEAD(&hdevice->sess_head);
 	list_add_tail(&hdevice->list, &hal_ctxt.dev_head);
 	hal_ctxt.dev_count++;
 

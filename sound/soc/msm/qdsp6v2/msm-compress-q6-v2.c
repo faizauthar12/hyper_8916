@@ -208,6 +208,27 @@ static int msm_compr_set_volume(struct snd_compr_stream *cstream,
 		pr_debug("%s: No volume config for passthrough %d\n",
 			 __func__, prtd->compr_passthr);
 		return rc;
+	if (prtd && prtd->audio_client) {
+		if (prtd->compr_passthr != LEGACY_PCM) {
+			pr_debug("%s: No volume config for passthrough %d\n",
+				 __func__, prtd->compr_passthr);
+			return rc;
+		}
+		pr_debug("%s: call q6asm_set_lrgain\n", __func__);
+		rc = q6asm_set_lrgain(prtd->audio_client, volume_l, volume_r);
+		if (rc < 0) {
+			pr_err("%s: Send LR gain command failed rc=%d\n",
+				__func__, rc);
+		} else {
+			pr_debug("%s: now calling msm_dts_eagle_set_volume\n",
+				 __func__);
+			rc = msm_dts_eagle_set_volume(prtd->audio_client,
+						      volume_l, volume_r);
+			if (rc < 0) {
+				pr_err("%s: Send Volume command failed (DTS_EAGLE) rc=%d\n",
+						__func__, rc);
+			}
+		}
 	}
 	if (prtd->num_channels > 2) {
 		/*
