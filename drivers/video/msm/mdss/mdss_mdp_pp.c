@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2175,6 +2175,8 @@ static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
 	}
 
 	mutex_lock(&ad->lock);
+	if (!mfd->ad_bl_level)
+		mfd->ad_bl_level = bl_in;
 	if (!(ad->state & PP_AD_STATE_RUN)) {
 		pr_debug("AD is not running.\n");
 		mutex_unlock(&ad->lock);
@@ -3018,17 +3020,11 @@ int mdss_mdp_argc_config(struct mdp_pgc_lut_data *config,
 		argc_addr = mdss_mdp_get_mixer_addr_off(dspp_num) +
 			MDSS_MDP_REG_LM_GC_LUT_BASE;
 		pgc_ptr = &mdss_pp_res->argc_disp_cfg[disp_num];
-		if (config->flags & MDP_PP_OPS_WRITE)
-			mdss_pp_res->pp_disp_flags[disp_num] |=
-				PP_FLAGS_DIRTY_ARGC;
 		break;
 	case MDSS_PP_DSPP_CFG:
 		argc_addr = mdss_mdp_get_dspp_addr_off(dspp_num) +
 					MDSS_MDP_REG_DSPP_GC_BASE;
 		pgc_ptr = &mdss_pp_res->pgc_disp_cfg[disp_num];
-		if (config->flags & MDP_PP_OPS_WRITE)
-			mdss_pp_res->pp_disp_flags[disp_num] |=
-				PP_FLAGS_DIRTY_PGC;
 		break;
 	default:
 		goto argc_config_exit;
@@ -3111,6 +3107,12 @@ int mdss_mdp_argc_config(struct mdp_pgc_lut_data *config,
 			&mdss_pp_res->gc_lut_g[disp_num][0];
 		pgc_ptr->b_data =
 			&mdss_pp_res->gc_lut_b[disp_num][0];
+		if (PP_LOCAT(config->block) == MDSS_PP_LM_CFG)
+			mdss_pp_res->pp_disp_flags[disp_num] |=
+				PP_FLAGS_DIRTY_ARGC;
+		else if (PP_LOCAT(config->block) == MDSS_PP_DSPP_CFG)
+			mdss_pp_res->pp_disp_flags[disp_num] |=
+				PP_FLAGS_DIRTY_PGC;
 	}
 argc_config_exit:
 	mutex_unlock(&mdss_pp_mutex);
