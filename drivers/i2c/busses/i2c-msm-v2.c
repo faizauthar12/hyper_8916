@@ -407,7 +407,11 @@ struct i2c_msm_clk_div_fld {
  * divider values as per HW Designers
  */
 static struct i2c_msm_clk_div_fld i2c_msm_clk_div_map[] = {
+#ifdef CONFIG_MACH_WT86518
+	{KHz(100), 124, 80},
+#else
 	{KHz(100), 124, 62},
+#endif
 	{KHz(400),  28, 14},
 	{KHz(1000),  8,  5},
 };
