@@ -86,6 +86,8 @@ rm -rf zImage
 rm -rf dtb
 cd $KERNEL_DIR
 make clean && make mrproper
+git reset --hard HEAD
+git fetch && git pull
 
 make_kernel
 make_dtb
