@@ -76,7 +76,6 @@ obj-$(CONFIG_SENSORS_CAPELLA_CM36283)	+= cm36283.o
 obj-$(CONFIG_SENSORS_MPU6050)		+= mpu6050.o
 obj-$(CONFIG_SENSORS_AKM8963)		+= akm8963.o
 obj-$(CONFIG_SENSORS_AKM09911)		+= akm09911.o
-obj-$(CONFIG_SENSORS_ST480)		+= st480.o
 obj-$(CONFIG_SENSORS_LIS3DH)		+= lis3dh_acc.o
 obj-$(CONFIG_SENSORS_AP3426)		+= ap3426.o
 obj-$(CONFIG_SENSORS_AP3426_CM)		+= ap3426_cm.o
@@ -85,6 +84,9 @@ obj-$(CONFIG_SENSORS_MPU6880)		+= mpu6880.o
 obj-$(CONFIG_SENSORS_PA12200001)	+= pa12200001.o
 obj-$(CONFIG_SENSORS_YL_HALL)		+= coolpad_hall.o
 obj-$(CONFIG_SENSORS_YL_PARAMS)		+= yl_sensor_params.o
+
+obj-$(CONFIG_SENSORS_ELAN_EPL259x)      += epl259x.o
+obj-$(CONFIG_SENSORS_ST480)             += st480.o
 
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bma2x2.o
 obj-$(CONFIG_SENSORS_LTR553)	+= ltr553.o
