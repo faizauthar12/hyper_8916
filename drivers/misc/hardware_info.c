@@ -48,11 +48,11 @@ static long hardwareinfo_ioctl(struct file *file, unsigned int cmd,unsigned long
 		hardwareinfo_num = HARDWARE_BACK_CAM;
 		break;
 	case HARDWARE_BT_GET:
-		hardwareinfo_set_prop(HARDWARE_BT, "Qualcomm-msm8916");
+		hardwareinfo_set_prop(HARDWARE_BT, "Qualcomm");
 		hardwareinfo_num = HARDWARE_BT;
 		break;
 	case HARDWARE_WIFI_GET:
-		hardwareinfo_set_prop(HARDWARE_WIFI, "Qualcomm-msm8916");
+		hardwareinfo_set_prop(HARDWARE_WIFI, "Qualcomm");
 		hardwareinfo_num = HARDWARE_WIFI;
 		break;	
 	case HARDWARE_ACCELEROMETER_GET:
@@ -68,19 +68,41 @@ static long hardwareinfo_ioctl(struct file *file, unsigned int cmd,unsigned long
 		hardwareinfo_num = HARDWARE_MAGNETOMETER;
 		break;		
 	case HARDWARE_GPS_GET:
-		hardwareinfo_set_prop(HARDWARE_GPS, "Qualcomm-msm8916");
+		hardwareinfo_set_prop(HARDWARE_GPS, "Qualcomm");
 	    hardwareinfo_num = HARDWARE_GPS;
 		break;
 	case HARDWARE_FM_GET:
-		hardwareinfo_set_prop(HARDWARE_FM, "Qualcomm-msm8916");
+		hardwareinfo_set_prop(HARDWARE_FM, "Qualcomm");
 	    hardwareinfo_num = HARDWARE_FM;		
-		break;
-	case HARDWARE_BACK_CAM_MOUDULE_ID_GET:
-		hardwareinfo_num = HARDWARE_BACK_CAM_MOUDULE_ID;
 		break;
 	case HARDWARE_BATTERY_ID_GET:
 		hardwareinfo_num = HARDWARE_BATTERY_ID;
 		break;		
+	case HARDWARE_BACK_CAM_MOUDULE_ID_GET:
+		hardwareinfo_num = HARDWARE_BACK_CAM_MOUDULE_ID;
+		break;
+	case HARDWARE_FRONT_CAM_MODULE_ID_GET:
+		hardwareinfo_num = HARDWARE_FRONT_CAM_MOUDULE_ID;
+		break;		
+	case HARDWARE_BOARD_ID_GET:
+		hardwareinfo_num = HARDWARE_BOARD_ID;
+		break;	
+	case HARDWARE_BACK_CAM_MOUDULE_ID_SET:
+		if(copy_from_user(hardwareinfo_name[HARDWARE_BACK_CAM_MOUDULE_ID], data,strlen(data)))
+		{
+			pr_err("wgz copy_from_user error");
+			ret =  -EINVAL;
+		}
+		goto set_ok;
+		break;
+	case HARDWARE_FRONT_CAM_MODULE_ID_SET:
+		if(copy_from_user(hardwareinfo_name[HARDWARE_FRONT_CAM_MOUDULE_ID], data,strlen(data)))
+		{
+			pr_err("wgz copy_from_user error");
+			ret =  -EINVAL;
+		}
+		goto set_ok;
+		break;
 	default:
 		ret = -EINVAL;
 		goto err_out;
@@ -90,6 +112,7 @@ static long hardwareinfo_ioctl(struct file *file, unsigned int cmd,unsigned long
 		//printk("%s, copy to usr error\n", __func__);
 		ret =  -EINVAL;
 	}
+set_ok:
 err_out:
 	return ret;
 }
@@ -97,7 +120,9 @@ err_out:
 
 static struct file_operations hardwareinfo_fops = {
 	.owner = THIS_MODULE,
+	.open = simple_open,
 	.unlocked_ioctl = hardwareinfo_ioctl,
+	.compat_ioctl = hardwareinfo_ioctl,
 };
 
 static struct miscdevice hardwareinfo_device = {
